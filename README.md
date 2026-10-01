@@ -15,11 +15,14 @@
 ## 安装
 
 ```bash
+# 从 npm
+pi install npm:@johnnywu/pi-image-gen
+
+# 或从 git
+pi install git:github.com/jwu/pi-image-gen
+
 # 本地试用，不写任何配置
 pi -e /path/to/pi-image-gen
-
-# 或作为包安装
-pi install ./pi-image-gen
 ```
 
 装好后：

@@ -1,11 +1,29 @@
 {
-  "name": "pi-image-gen",
+  "name": "@johnnywu/pi-image-gen",
   "version": "0.1.0",
-  "private": true,
-  "description": "Image generation tool for pi coding agent (Codex / Grok / OpenAI Images)",
+  "description": "Image generation tool for the pi coding agent (Codex / Grok / OpenAI Images)",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package"],
+  "author": "Johnny Wu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jwu/pi-image-gen.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "image-generation",
+    "codex",
+    "grok",
+    "openai"
+  ],
+  "files": [
+    "src",
+    "scripts",
+    "README.md",
+    "DESIGN.md",
+    "LICENSE"
+  ],
   "pi": {
     "extensions": ["./src/extension.ts"]
   },
