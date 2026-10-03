@@ -102,6 +102,17 @@ pi -e /path/to/pi-image-gen
 
 生成的文件按实际格式落盘（`.png` / `.jpg` / `.webp`），权限 `0600`，路径会写进工具结果。
 
+## 终端渲染
+
+工具卡片支持折叠 / 展开，两种交互共用同一个状态：
+
+- **键盘**：`ctrl+o`（`app.tools.expand`）切换所有工具卡片，与 `read` / `grep` 的行为一致。
+- **鼠标**：fullscreen 模式下点击卡片，单独展开或收起这一张。
+
+折叠时调用行只显示提示词首行（约 80 字符）；展开后显示完整提示词（保留换行）以及显式传入的
+`provider` / `model` / `n` / `size` / `quality` / `aspectRatio` / `references` / `outputPath` 等参数。
+结果卡片同理：折叠显示图片数、通道 / 模型、耗时和前三条路径，展开后列出全部路径、warning 与 usage。
+
 ## 配置（可选）
 
 `<agent-dir>/image-gen/config.json`，默认目录是 `~/.pi/agent/`：

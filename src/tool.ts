@@ -4,10 +4,12 @@
  * 工具**静态注册一次**：description 写清三条通道、默认优先级与各自的能力差异，`provider` 的
  * enum 固定列出三个可选值。凭据状态变了也不重注册，改为在出错文案里列出当前可用通道。
  */
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent"
+import { keyText } from "@earendil-works/pi-coding-agent"
 import { StringEnum } from "@earendil-works/pi-ai"
 import type { JsonObject, JsonValue } from "@earendil-works/pi-ai"
-import { Type } from "typebox"
+import { Text } from "@earendil-works/pi-tui"
+import { Type, type Static } from "typebox"
 import type { Channel, ChannelDeps, ProviderId } from "./channels/types.ts"
 import { runGeneration, type GenerationResult } from "./runner.ts"
 import { loadConfig, type ImageGenConfig } from "./config.ts"
@@ -141,6 +143,136 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
+type ImageGenParams = Static<typeof Parameters>
+
+/** 折叠时提示词预览的最大字符数。 */
+const COLLAPSED_PROMPT_CHARS = 80
+/** 折叠时结果卡片里展示的最大路径条数。 */
+const COLLAPSED_RESULT_PATHS = 3
+/** 展开/收起工具输出的键位（默认 ctrl+o；鼠标点击走同一状态）。 */
+const EXPAND_KEY = "app.tools.expand" as const
+
+function expandHint(theme: Theme): string {
+  return theme.fg("dim", ` (${keyText(EXPAND_KEY)} to expand)`)
+}
+
+function truncateInline(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`
+}
+
+function firstPromptLine(prompt: string): string {
+  const breakIndex = prompt.search(/\r?\n/)
+  const line = breakIndex === -1 ? prompt : prompt.slice(0, breakIndex)
+  return line.trim()
+}
+
+/** 折叠态只保留 `image_gen "提示词首行" (ctrl+o to expand)` 一行。 */
+function formatCallCollapsed(args: ImageGenParams, theme: Theme): string {
+  const prompt = typeof args.prompt === "string" ? args.prompt.trim() : ""
+  const preview = truncateInline(firstPromptLine(prompt), COLLAPSED_PROMPT_CHARS)
+  const renderedPrompt = preview.length > 0 ? ` ${theme.fg("accent", `"${preview}"`)}` : ""
+  return `${theme.fg("toolTitle", theme.bold("image_gen"))}${renderedPrompt}${expandHint(theme)}`
+}
+
+/** 展开态显示完整提示词（保留换行）与非默认参数。 */
+function formatCallExpanded(args: ImageGenParams, theme: Theme): string {
+  const prompt = typeof args.prompt === "string" ? args.prompt.replace(/\r/g, "").trim() : ""
+  const lines = [theme.fg("toolTitle", theme.bold("image_gen"))]
+  if (prompt.length > 0) {
+    for (const line of prompt.split("\n")) lines.push(theme.fg("toolOutput", line))
+  }
+  const params = expandedParamLines(args)
+  if (params.length > 0) {
+    lines.push("")
+    for (const param of params) lines.push(theme.fg("muted", `  ${param}`))
+  }
+  return lines.join("\n")
+}
+
+function expandedParamLines(args: ImageGenParams): string[] {
+  const lines: string[] = []
+  const push = (label: string, value: unknown): void => {
+    if (value === undefined || value === null || value === "") return
+    if (Array.isArray(value)) {
+      if (value.length === 0) return
+      lines.push(`${label}: ${value.join(", ")}`)
+      return
+    }
+    lines.push(`${label}: ${String(value)}`)
+  }
+  push("provider", args.provider)
+  push("model", args.model)
+  push("n", args.n)
+  push("size", args.size)
+  push("quality", args.quality)
+  push("background", args.background)
+  push("moderation", args.moderation)
+  push("aspectRatio", args.aspectRatio)
+  push("resolution", args.resolution)
+  push("references", args.references)
+  push("outputPath", args.outputPath)
+  return lines
+}
+
+function formatResultSummary(details: ImageGenDetails, theme: Theme): string {
+  const parts = [`${details.imageCount} image${details.imageCount === 1 ? "" : "s"}`]
+  const providerModel = [details.provider, details.model]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join(" / ")
+  if (providerModel.length > 0) parts.push(`with ${providerModel}`)
+  if (details.upstreamMs !== undefined) parts.push(`in ${formatSeconds(details.upstreamMs)}`)
+  return theme.fg("success", parts.join(" "))
+}
+
+function formatResultError(details: ImageGenDetails, fallback: string, theme: Theme): string {
+  const message = details.error ?? fallback
+  const diagnostics: string[] = []
+  if (details.code !== undefined) diagnostics.push(`code=${details.code}`)
+  if (details.requestId !== undefined) diagnostics.push(`requestId=${details.requestId}`)
+  const suffix = diagnostics.length > 0 ? theme.fg("dim", ` [${diagnostics.join(" ")}]`) : ""
+  return `${theme.fg("error", message.length > 0 ? message : "image generation failed")}${suffix}`
+}
+
+function formatImageGenResult(
+  details: ImageGenDetails | undefined,
+  output: string,
+  expanded: boolean,
+  isError: boolean,
+  theme: Theme,
+): string {
+  if (details === undefined) {
+    return theme.fg("error", output.length > 0 ? output : "image_gen: missing details")
+  }
+  if (isError || details.error !== undefined) {
+    return formatResultError(details, output, theme)
+  }
+
+  const lines = [formatResultSummary(details, theme)]
+  if (expanded) {
+    for (const path of details.paths) lines.push(theme.fg("toolOutput", path))
+    for (const warning of details.warnings) lines.push(theme.fg("warning", `Warning: ${warning}`))
+    const total = details.usage?.total
+    if (total !== undefined) lines.push(theme.fg("dim", `Upstream usage: ${total} tokens`))
+    return lines.join("\n")
+  }
+
+  for (const path of details.paths.slice(0, COLLAPSED_RESULT_PATHS)) {
+    lines.push(theme.fg("toolOutput", path))
+  }
+  const hiddenPaths = details.paths.length - COLLAPSED_RESULT_PATHS
+  if (hiddenPaths > 0) {
+    const noun = hiddenPaths === 1 ? "path" : "paths"
+    lines.push(theme.fg("muted", `... (${hiddenPaths} more ${noun}, ${keyText(EXPAND_KEY)} to expand)`))
+  }
+  if (details.warnings.length > 0) {
+    const count = details.warnings.length
+    const noun = count === 1 ? "warning" : "warnings"
+    lines.push(theme.fg("warning", `${count} ${noun} (${keyText(EXPAND_KEY)} to expand)`))
+  }
+  return lines.join("\n")
+}
+
 function successText(result: GenerationResult, inlineCount: number): string {
   const lines: string[] = []
   lines.push(
@@ -201,6 +333,26 @@ export function registerImageGenTool(pi: ExtensionAPI, options: ImageGenToolOpti
     // 通道内有并发闸门，同批调用串行执行。
     executionMode: "sequential",
     annotations: { openWorldHint: true, readOnlyHint: false, idempotentHint: false },
+
+    // 折叠显示提示词首行，展开显示完整提示词与非默认参数；
+    // ctrl+o（app.tools.expand）与鼠标点击共用同一个 expanded 状态。
+    renderCall(args, theme, context) {
+      const text = context.expanded
+        ? formatCallExpanded(args, theme)
+        : formatCallCollapsed(args, theme)
+      return new Text(text, 0, 0)
+    },
+
+    renderResult(result, options, theme, context) {
+      if (options.isPartial) {
+        return new Text(theme.fg("warning", "Generating image(s)..."), 0, 0)
+      }
+      const textBlock = result.content.find((block) => block.type === "text")
+      const output = textBlock?.type === "text" ? textBlock.text : ""
+      const details = result.details as ImageGenDetails | undefined
+      const text = formatImageGenResult(details, output, options.expanded, context.isError, theme)
+      return new Text(text, 0, 0)
+    },
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const prompt = params.prompt.trim()

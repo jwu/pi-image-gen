@@ -106,6 +106,8 @@ pi.registerTool({
   parameters: T.Object({ ... }),
   executionMode: "sequential",   // 通道有并发闸门，见 §5.6
   annotations: { openWorldHint: true, idempotentHint: false },
+  renderCall: (args, theme, ctx) => { ... },     // 折叠提示词首行；展开完整提示词 + 非默认参数
+  renderResult: (result, options, theme, ctx) => { ... }, // 折叠摘要 + 前 3 条路径；展开全部
   execute: async (toolCallId, params, signal, onUpdate, ctx) => { ... },
 });
 ```
@@ -419,6 +421,8 @@ device code 与 user code 通过 `ctx.ui` 展示（TUI 用 `ctx.ui.custom` 或 `
 ## 11. 待确认 / 开放问题
 
 1. Codex 生图端点对 `gpt-image-2` 之外的模型是否可用、是否接受 `output_format`。
-2. 是否需要 `renderResult` 自定义 TUI 渲染（显示缩略路径 + 耗时），目前用默认渲染。
+2. 自定义 TUI 渲染已实现（见 §4）：`renderCall` 折叠显示提示词首行、展开显示完整提示词与非默认
+   参数；`renderResult` 折叠显示图片数 / 通道 / 耗时与前三条路径，展开补齐 warning 与 usage。
+   `ctrl+o`（`app.tools.expand`）与鼠标点击共用同一个 `expanded` 状态。
 3. `openai-codex` 登录在 pi 里标为 legacy；本插件已改成自持 OAuth，不再受这个状态影响。
    但如果未来 Codex CLI 的公开 client（`app_EMoamEEZ…`）被回收，需要换 client 或改用其他通道。

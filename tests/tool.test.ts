@@ -6,6 +6,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ExtensionToolContext,
+  Theme,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent"
 import { Value } from "typebox/value"
@@ -190,5 +191,144 @@ describe("image_gen execute", () => {
     const text = (result.content[0] as { text: string }).text
     expect(text).toContain("codex generates at most 1 image(s)")
     expect(text).toContain("No channel supports this request")
+  })
+})
+
+const renderTheme = {
+  fg: (_token: string, text: string) => text,
+  bold: (text: string) => text,
+} as unknown as Theme
+
+function renderToolCall(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+  expanded: boolean,
+): string {
+  const context = { expanded, isError: false }
+  const component = tool.renderCall?.(args as never, renderTheme, context as never)
+  return component?.render(200).join("\n") ?? ""
+}
+
+function renderToolResult(
+  tool: ToolDefinition,
+  result: unknown,
+  expanded: boolean,
+  isError = false,
+): string {
+  const options = { expanded, isPartial: false }
+  const context = { isError }
+  const component = tool.renderResult?.(
+    result as never,
+    options as never,
+    renderTheme,
+    context as never,
+  )
+  return component?.render(200).join("\n") ?? ""
+}
+
+function successResult(paths: string[], warnings: string[] = ["slow"]): unknown {
+  return {
+    content: [{ type: "text", text: "Generated image(s)" }],
+    details: {
+      paths,
+      provider: "openai",
+      model: "gpt-image-2",
+      imageCount: paths.length,
+      upstreamMs: 1234,
+      warnings,
+      usage: { total: 42 },
+    },
+    isError: false,
+  }
+}
+
+describe("image_gen render", () => {
+  const longPrompt =
+    "A cinematic photo of a cat sitting on a windowsill at golden hour, shallow depth of field, 35mm film grain and warm backlight"
+
+  test("折叠态显示截断后的提示词首行与展开提示", () => {
+    const { tool } = setup()
+    const text = renderToolCall(tool, { prompt: longPrompt, provider: "codex" }, false)
+
+    expect(text).toContain("image_gen")
+    expect(text).toContain("...")
+    expect(text).toContain("to expand")
+    expect(text).not.toContain("warm backlight")
+    expect(text).not.toContain("\n")
+  })
+
+  test("展开态显示完整提示词与非默认参数，且保留换行", () => {
+    const { tool } = setup()
+    const text = renderToolCall(
+      tool,
+      {
+        prompt: "first line\nsecond line",
+        provider: "grok",
+        model: "grok-2-image",
+        n: 2,
+        aspectRatio: "16:9",
+        references: ["a.png", "b.png"],
+        outputPath: "out/",
+      },
+      true,
+    )
+
+    expect(text).toContain("first line")
+    expect(text).toContain("second line")
+    expect(text).toContain("provider: grok")
+    expect(text).toContain("model: grok-2-image")
+    expect(text).toContain("n: 2")
+    expect(text).toContain("aspectRatio: 16:9")
+    expect(text).toContain("references: a.png, b.png")
+    expect(text).toContain("outputPath: out/")
+  })
+
+  test("展开态不打印未提供的参数", () => {
+    const { tool } = setup()
+    const text = renderToolCall(tool, { prompt: "hi" }, true)
+    expect(text).not.toContain("provider:")
+    expect(text).not.toContain("size:")
+  })
+
+  test("折叠结果展示摘要与前三条路径", () => {
+    const { tool } = setup()
+    const text = renderToolResult(tool, successResult(["a.png", "b.png", "c.png", "d.png"]), false)
+
+    expect(text).toContain("4 images with openai / gpt-image-2 in 1.2s")
+    expect(text).toContain("a.png")
+    expect(text).toContain("c.png")
+    expect(text).not.toContain("d.png")
+    expect(text).toContain("1 more path")
+    expect(text).not.toContain("Warning: slow")
+  })
+
+  test("展开结果列出全部路径、warning 与 usage", () => {
+    const { tool } = setup()
+    const text = renderToolResult(tool, successResult(["a.png", "b.png", "c.png", "d.png"]), true)
+
+    expect(text).toContain("d.png")
+    expect(text).toContain("Warning: slow")
+    expect(text).toContain("Upstream usage: 42 tokens")
+  })
+
+  test("错误结果展示错误信息与诊断字段", () => {
+    const { tool } = setup()
+    const result = {
+      content: [{ type: "text", text: "boom" }],
+      details: {
+        paths: [],
+        imageCount: 0,
+        warnings: [],
+        error: "upstream rejected",
+        code: "E42",
+        requestId: "req-1",
+      },
+      isError: true,
+    }
+    const text = renderToolResult(tool, result, false, true)
+
+    expect(text).toContain("upstream rejected")
+    expect(text).toContain("code=E42")
+    expect(text).toContain("requestId=req-1")
   })
 })
