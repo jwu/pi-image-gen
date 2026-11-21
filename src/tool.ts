@@ -6,7 +6,6 @@
  */
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent"
 import { keyText } from "@earendil-works/pi-coding-agent"
-import { StringEnum } from "@earendil-works/pi-ai"
 import type { JsonObject, JsonValue } from "@earendil-works/pi-ai"
 import { Text } from "@earendil-works/pi-tui"
 import { Type, type Static } from "typebox"
@@ -20,6 +19,19 @@ const QUALITIES = ["auto", "low", "medium", "high", "xhigh", "max"] as const
 const BACKGROUNDS = ["auto", "transparent", "opaque"] as const
 const RESOLUTIONS = ["1k", "1.5k", "2k"] as const
 const MODERATIONS = ["auto", "low"] as const
+
+/**
+ * 与 `@earendil-works/pi-ai` 的 StringEnum 等价，但返回本地 typebox 的 schema。
+ * pi-ai 的版本返回 pi-schema 的 Schema，和这里 `Type.Optional()` 混用会让 Static
+ * 推导丢成 unknown；用 Type.Unsafe 保留字面量类型，同时仍生成 Google 兼容的
+ * `{ type: "string", enum: [...] }`。
+ */
+function stringEnum<T extends readonly string[]>(
+  values: T,
+  options?: { description?: string },
+) {
+  return Type.Unsafe<T[number]>({ type: "string", enum: [...values], ...options })
+}
 
 const DESCRIPTION = `Generate an image from a text prompt, optionally guided by reference images (image-to-image).
 
@@ -40,7 +52,7 @@ const Parameters = Type.Object(
       description: "What to draw. Be specific about subject, style, composition, and lighting.",
     }),
     provider: Type.Optional(
-      StringEnum(["codex", "grok", "openai"], {
+      stringEnum(["codex", "grok", "openai"], {
         description:
           "Which channel to use. Omit to use the first configured channel (codex, grok, openai).",
       }),
@@ -62,18 +74,18 @@ const Parameters = Type.Object(
       }),
     ),
     quality: Type.Optional(
-      StringEnum(QUALITIES, {
+      stringEnum(QUALITIES, {
         description:
           "openai: all values. codex: up to high. grok: up to medium. Defaults to the channel default.",
       }),
     ),
     background: Type.Optional(
-      StringEnum(BACKGROUNDS, {
+      stringEnum(BACKGROUNDS, {
         description: "openai and codex: transparent background needs PNG output.",
       }),
     ),
     moderation: Type.Optional(
-      StringEnum(MODERATIONS, {
+      stringEnum(MODERATIONS, {
         description:
           'openai only: content moderation strength. Defaults to "low", which is filtered less aggressively by the upstream.',
       }),
@@ -81,7 +93,7 @@ const Parameters = Type.Object(
     aspectRatio: Type.Optional(
       Type.String({ description: 'grok only, e.g. "16:9", "1:1", "auto".' }),
     ),
-    resolution: Type.Optional(StringEnum(RESOLUTIONS, { description: "grok only." })),
+    resolution: Type.Optional(stringEnum(RESOLUTIONS, { description: "grok only." })),
     references: Type.Optional(
       Type.Array(Type.String(), {
         maxItems: 16,
